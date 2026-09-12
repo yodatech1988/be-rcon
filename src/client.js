@@ -49,8 +49,23 @@ export async function connectRcon({
   const pending = new Map(); // sequence -> { resolve, reject, timer, parts }
   let keepaliveTimer = null;
   let loginSettled = false;
+  let socketClosed = false;
 
   const send = (packet) => socket.send(packet, port, host);
+
+  // dgram throws if close() is called twice, and a login failure can race a caller's close().
+  const closeSocket = () => {
+    if (socketClosed) return;
+    socketClosed = true;
+    socket.close();
+  };
+
+  // EventEmitter throws (crashing the process) when "error" is emitted with no listener. Until
+  // connectRcon resolves the caller cannot have attached one, so a stray datagram during login
+  // must not be fatal; after that, errors go to whoever listens.
+  const emitError = (err) => {
+    if (emitter.listenerCount("error") > 0) emitter.emit("error", err);
+  };
 
   function settleCommand(sequenceNumber, text) {
     const waiter = pending.get(sequenceNumber);
@@ -66,7 +81,7 @@ export async function connectRcon({
     const failLogin = (message) => {
       loginSettled = true;
       clearTimeout(loginTimer);
-      socket.close();
+      closeSocket();
       reject(new Error(message));
     };
 
@@ -84,7 +99,7 @@ export async function connectRcon({
       try {
         packet = parsePacket(datagram);
       } catch (err) {
-        emitter.emit("error", err);
+        emitError(err);
         return;
       }
 
@@ -123,10 +138,22 @@ export async function connectRcon({
         }
       }
     });
+
+    // A socket error before login (e.g. an unresolvable host) fails the login instead of
+    // surfacing as an unhandled "error" event.
+    socket.on("error", (err) => {
+      if (!loginSettled) {
+        failLogin(`RCON socket error connecting to ${host}:${port}: ${err.message}`);
+        return;
+      }
+      emitError(err);
+    });
   });
 
-  socket.on("error", (err) => emitter.emit("error", err));
-  socket.on("close", () => emitter.emit("close"));
+  socket.on("close", () => {
+    socketClosed = true;
+    emitter.emit("close");
+  });
 
   send(loginPacket(password));
   await loginResult;
@@ -148,9 +175,13 @@ export async function connectRcon({
 
   emitter.close = () => {
     if (keepaliveTimer) clearInterval(keepaliveTimer);
-    for (const waiter of pending.values()) clearTimeout(waiter.timer);
+    // Reject in-flight commands; otherwise their promises never settle and callers hang.
+    for (const waiter of pending.values()) {
+      clearTimeout(waiter.timer);
+      waiter.reject(new Error("RCON connection closed before the command was answered"));
+    }
     pending.clear();
-    socket.close();
+    closeSocket();
   };
 
   return emitter;
