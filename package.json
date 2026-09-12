@@ -1,0 +1,11 @@
+{
+  "name": "@aegis/be-rcon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared BattlEye RCON protocol client (packet framing, CRC32, login/command/keepalive), extracted from admin-bot's and chat-ai's independent from-scratch implementations. Consumed as a git submodule by aegis-services and claude-agents — see this package's README.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  }
+}
