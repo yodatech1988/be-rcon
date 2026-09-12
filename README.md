@@ -43,6 +43,10 @@ import { crc32, PacketType, loginPacket, commandPacket, keepalivePacket, ackPack
   with `.sendCommand()`, `.sayToPlayer()`, `.close()`, and `"chat"` /
   `"error"` / `"close"` events.
 
+See [`aegis-core/docs/OUTSTANDING.md`](https://github.com/yodatech1988/core/blob/main/docs/OUTSTANDING.md)
+for this repo's open item (the framing disagreement below) in context with the rest of the
+network.
+
 ## Known disagreement — needs a live-server test, not a guess
 
 `aegis-services/admin-bot/src/tools/beRcon.js` (pre-extraction) sent an **extra leading `0xFF`
