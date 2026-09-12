@@ -182,3 +182,34 @@ test("sayToPlayer issues the say command for that slot", async () => {
   rcon.close();
   server.close();
 });
+
+test("a garbage datagram during login does not crash the process", async () => {
+  // No "error" listener can exist yet, so emitting one would throw out of the socket handler.
+  const server = await startFakeServer((packet) =>
+    packet.type === "login" ? [Buffer.from("garbage", "ascii"), loginResponse(true)] : null,
+  );
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
+
+  assert.equal(server.received[0].type, "login");
+  rcon.close();
+  server.close();
+});
+
+test("an unresolvable host rejects the login instead of throwing an unhandled error", async () => {
+  await assert.rejects(
+    () => connectRcon({ host: "no-such-host.invalid", port: 2302, password: "pw", loginTimeoutMs: 5000 }),
+    /socket error/,
+  );
+});
+
+test("close() rejects commands still waiting for a response", async () => {
+  const server = await startFakeServer((packet) => (packet.type === "login" ? loginResponse(true) : null));
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
+
+  const inFlight = rcon.sendCommand("players");
+  rcon.close();
+
+  await assert.rejects(() => inFlight, /connection closed/);
+  assert.doesNotThrow(() => rcon.close());
+  server.close();
+});
