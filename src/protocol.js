@@ -44,12 +44,12 @@ function framePayload(payload) {
 }
 
 export function loginPacket(password) {
-  return framePayload(Buffer.concat([Buffer.from([PREFIX, PacketType.LOGIN]), Buffer.from(password, "ascii")]));
+  return framePayload(Buffer.concat([Buffer.from([PREFIX, PacketType.LOGIN]), Buffer.from(password, "utf8")]));
 }
 
 export function commandPacket(sequence, command) {
   return framePayload(
-    Buffer.concat([Buffer.from([PREFIX, PacketType.COMMAND, sequence]), Buffer.from(command, "ascii")]),
+    Buffer.concat([Buffer.from([PREFIX, PacketType.COMMAND, sequence]), Buffer.from(command, "utf8")]),
   );
 }
 
@@ -91,18 +91,24 @@ export function parsePacket(buffer) {
       // Single-part ASCII responses never start with 0x00, which is what makes this
       // distinguishable.
       if (rest.length >= 3 && rest[0] === 0x00) {
+        // `bytes` is kept so the client can join parts before decoding: a
+        // multi-byte UTF-8 character can be split across two parts.
+        const bytes = rest.subarray(3);
         return {
           type: "command",
           sequence,
           multipart: { count: rest[1], index: rest[2] },
-          data: rest.subarray(3).toString("ascii"),
+          bytes,
+          data: bytes.toString("utf8"),
         };
       }
-      return { type: "command", sequence, data: rest.toString("ascii") };
+      return { type: "command", sequence, bytes: rest, data: rest.toString("utf8") };
     }
 
     case PacketType.SERVER_MESSAGE:
-      return { type: "serverMessage", sequence: body[0], message: body.subarray(1).toString("ascii") };
+      // Text is UTF-8, not ASCII: decoding as "ascii" strips the high bit and turns
+      // every non-English player name and chat line into garbage.
+      return { type: "serverMessage", sequence: body[0], message: body.subarray(1).toString("utf8") };
 
     default:
       throw new Error(`Unknown RCON packet type 0x${type.toString(16)}`);

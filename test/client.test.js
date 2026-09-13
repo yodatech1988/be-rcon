@@ -19,7 +19,12 @@ const loginResponse = (ok) => frame(Buffer.from([0xff, 0x00, ok ? 0x01 : 0x00]))
 const commandResponse = (sequence, text) =>
   frame(Buffer.concat([Buffer.from([0xff, 0x01, sequence]), Buffer.from(text, "ascii")]));
 const multipartResponse = (sequence, count, index, text) =>
-  frame(Buffer.concat([Buffer.from([0xff, 0x01, sequence, 0x00, count, index]), Buffer.from(text, "ascii")]));
+  frame(
+    Buffer.concat([
+      Buffer.from([0xff, 0x01, sequence, 0x00, count, index]),
+      Buffer.isBuffer(text) ? text : Buffer.from(text, "utf8"),
+    ]),
+  );
 const serverMessage = (sequence, text) =>
   frame(Buffer.concat([Buffer.from([0xff, 0x02, sequence]), Buffer.from(text, "ascii")]));
 
@@ -115,6 +120,26 @@ test("a multipart response is reassembled in index order even when it arrives ou
   const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
 
   assert.equal(await rcon.sendCommand("players"), "first second third");
+  rcon.close();
+  server.close();
+});
+
+test("a multi-byte character split across two parts survives reassembly", async () => {
+  const bytes = Buffer.from("Players: Лёша", "utf8");
+  const cut = bytes.length - 1; // splits the final two-byte character
+  const server = await startFakeServer((packet) => {
+    if (packet.type === "login") return loginResponse(true);
+    if (packet.type === "command") {
+      return [
+        multipartResponse(packet.sequence, 2, 1, bytes.subarray(cut)),
+        multipartResponse(packet.sequence, 2, 0, bytes.subarray(0, cut)),
+      ];
+    }
+    return null;
+  });
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
+
+  assert.equal(await rcon.sendCommand("players"), "Players: Лёша");
   rcon.close();
   server.close();
 });

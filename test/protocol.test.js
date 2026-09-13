@@ -96,6 +96,16 @@ test("parses a server message and its sequence number", () => {
   assert.equal(parsed.message, "(Global) Bob: hi");
 });
 
+test("decodes non-ASCII server messages as UTF-8", () => {
+  const payload = Buffer.concat([Buffer.from([0xff, 0x02, 3]), Buffer.from("(Global) Лёша: привет, café", "utf8")]);
+  assert.equal(parsePacket(frame(payload)).message, "(Global) Лёша: привет, café");
+});
+
+test("encodes non-ASCII commands as UTF-8", () => {
+  const packet = commandPacket(1, "say -1 Привет");
+  assert.equal(packet.subarray(9).toString("utf8"), "say -1 Привет");
+});
+
 test("a corrupted packet is rejected rather than acted on", () => {
   const good = frame(Buffer.from([0xff, 0x02, 1, 0x41]));
   const corrupted = Buffer.from(good);
