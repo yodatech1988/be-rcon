@@ -105,6 +105,24 @@ test("sendCommand resolves with the response body", async () => {
   server.close();
 });
 
+test("the first command on a connection uses sequence 0, then counts up", async () => {
+  const server = await startFakeServer((packet) => {
+    if (packet.type === "login") return loginResponse(true);
+    if (packet.type === "command") return commandResponse(packet.sequence, "ok");
+    return null;
+  });
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
+
+  await rcon.sendCommand("players");
+  await rcon.sendCommand("players");
+  assert.deepEqual(
+    server.received.filter((p) => p.type === "command").map((p) => p.sequence),
+    [0, 1],
+  );
+  rcon.close();
+  server.close();
+});
+
 test("a multipart response is reassembled in index order even when it arrives out of order", async () => {
   const server = await startFakeServer((packet) => {
     if (packet.type === "login") return loginResponse(true);

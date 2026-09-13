@@ -38,9 +38,13 @@ export async function connectRcon({
   const socket = createSocket("udp4");
   const emitter = new EventEmitter();
 
-  let sequence = 0;
+  // The first command on a connection must be sequence 0, then in order. Confirmed
+  // live 2026-09-13 against site-chernarus: starting at 1, login and server messages
+  // worked but no command (or keepalive) was ever answered. aegis-site-chernarus's
+  // sync/bercon.py, which ran commands live on 2026-09-11, starts at 0.
   // Sequence numbers are a single byte. At this traffic level a wrap can't collide
   // with an outstanding command, but that's the assumption being made.
+  let sequence = -1;
   const nextSequence = () => {
     sequence = (sequence + 1) % 256;
     return sequence;
