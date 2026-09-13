@@ -131,9 +131,11 @@ export async function connectRcon({
         }
         const waiter = pending.get(packet.sequence);
         if (!waiter) return;
-        waiter.parts.set(packet.multipart.index, packet.data);
+        waiter.parts.set(packet.multipart.index, packet.bytes);
         if (waiter.parts.size === packet.multipart.count) {
-          const joined = Array.from({ length: packet.multipart.count }, (_, i) => waiter.parts.get(i) ?? "").join("");
+          const joined = Buffer.concat(
+            Array.from({ length: packet.multipart.count }, (_, i) => waiter.parts.get(i) ?? Buffer.alloc(0)),
+          ).toString("utf8");
           settleCommand(packet.sequence, joined);
         }
       }
