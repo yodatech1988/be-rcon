@@ -47,20 +47,18 @@ See [`aegis-core/docs/OUTSTANDING.md`](https://github.com/yodatech1988/core/blob
 for this repo's open item (the framing disagreement below) in context with the rest of the
 network.
 
-## Known disagreement — needs a live-server test, not a guess
+## Live-confirmed protocol details (AEGIS Chernarus, 2026-09-13/14)
 
-`aegis-services/admin-bot/src/tools/beRcon.js` (pre-extraction) sent an **extra leading `0xFF`
-byte** before the `'B' 'E'` magic bytes, i.e. wire packets of
-`0xFF 'B' 'E' <crc> 0xFF <type> <data>` (7 bytes of header) instead of the
-`'B' 'E' <crc> 0xFF <type> <data>` (6 bytes) that `chat-ai`'s original `protocol.js` sent and
-that matches the documented BE spec. admin-bot expected the same extra `0xFF` on responses too,
-so it was internally self-consistent — but it disagreed with chat-ai's framing. This package
-implements the 6-byte framing only, since that's what both the spec and chat-ai's
-independently-framed test fixtures agree on.
-
-Whoever runs the next live RCON session against the real DayZ server should capture a raw hex
-dump of what the server actually echoes back and settle which framing (or whether both work, if
-BE's parser tolerates leading garbage) is correct.
+- **Framing:** the spec's 6-byte header (`'B' 'E' <crc32 LE> 0xFF <type> <data>`) is correct;
+  login and server messages work with it. admin-bot's old extra leading `0xFF` was wrong. This
+  settles the former "Known disagreement" section (claude-agents#14).
+- **Sequence numbers start at 0.** The first command packet after login (a keepalive or a real
+  command) must be sequence 0. A client starting at 1 logs in and receives server messages, but
+  no command or keepalive is ever answered. A fix for this was pushed to be-rcon#3's branch after
+  that PR had already merged, so it never reached `main` until this change.
+- **Keepalive:** an empty command packet every 30 s (BE drops a client idle for 45 s).
+- **Server messages:** acked with `0xFF 0x02 <sequence>` immediately; a resend of the same
+  sequence is acked again but emitted once.
 
 ## Tests
 
