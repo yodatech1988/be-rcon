@@ -238,3 +238,68 @@ test("close() rejects commands still waiting for a response", async () => {
   assert.doesNotThrow(() => rcon.close());
   server.close();
 });
+
+test("the first command after login uses sequence 0, then counts up", async () => {
+  // Live-confirmed 2026-09-13 (claude-agents#14): the AEGIS Chernarus BE server
+  // answers nothing unless the first command packet is sequence 0.
+  const server = await startFakeServer((packet) => {
+    if (packet.type === "login") return loginResponse(true);
+    if (packet.type === "command") return commandResponse(packet.sequence, "ok");
+    return null;
+  });
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
+
+  await rcon.sendCommand("players");
+  await rcon.sendCommand("players");
+
+  const commands = server.received.filter((p) => p.type === "command");
+  assert.deepEqual(
+    commands.map((p) => p.sequence),
+    [0, 1],
+  );
+  rcon.close();
+  server.close();
+});
+
+test("a keepalive sent before any command also uses sequence 0 and is an empty command", async () => {
+  const server = await startFakeServer((packet) => {
+    if (packet.type === "login") return loginResponse(true);
+    if (packet.type === "command") return commandResponse(packet.sequence, "");
+    return null;
+  });
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw", keepaliveMs: 20 });
+
+  await waitUntil(() => server.received.some((p) => p.type === "command"));
+  const first = server.received.find((p) => p.type === "command");
+  assert.equal(first.sequence, 0);
+  assert.equal(first.data, "");
+
+  rcon.close();
+  server.close();
+});
+
+test("the default keepalive interval is under BE's 45 second idle limit", async () => {
+  const source = await import("node:fs").then((fs) =>
+    fs.readFileSync(new URL("../src/client.js", import.meta.url), "utf8"),
+  );
+  const ms = Number(/const KEEPALIVE_MS = ([\d_]+);/.exec(source)[1].replaceAll("_", ""));
+  assert.ok(ms > 0 && ms < 45_000, `KEEPALIVE_MS=${ms}`);
+});
+
+test("a resent server message is acked again but emitted only once", async () => {
+  const server = await startFakeServer((packet) => (packet.type === "login" ? loginResponse(true) : null));
+  const rcon = await connectRcon({ host: "127.0.0.1", port: server.port, password: "pw" });
+
+  const lines = [];
+  rcon.on("chat", (line) => lines.push(line));
+  server.push(serverMessage(4, "Player #0 Bob disconnected"));
+  await waitUntil(() => server.received.filter((p) => p.type === "serverMessage").length === 1);
+  server.push(serverMessage(4, "Player #0 Bob disconnected"));
+  await waitUntil(() => server.received.filter((p) => p.type === "serverMessage").length === 2);
+  server.push(serverMessage(5, "(Global) Bob: hi"));
+  await waitUntil(() => lines.length === 2);
+
+  assert.deepEqual(lines, ["Player #0 Bob disconnected", "(Global) Bob: hi"]);
+  rcon.close();
+  server.close();
+});

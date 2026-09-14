@@ -38,13 +38,23 @@ export async function connectRcon({
   const socket = createSocket("udp4");
   const emitter = new EventEmitter();
 
+  // The FIRST command packet after login (keepalive or real command) must use
+  // sequence 0. The live AEGIS Chernarus server silently ignores every command
+  // otherwise: live-confirmed 2026-09-13 (claude-agents#14) and again 2026-09-14,
+  // when a client starting at 1 saw every `players` time out and reconnected
+  // every ~2 min, and starting at 0 answered immediately. BERConProtocol.txt:
+  // "1-byte sequence number (starting at 0)".
   let sequence = 0;
   // Sequence numbers are a single byte. At this traffic level a wrap can't collide
   // with an outstanding command, but that's the assumption being made.
   const nextSequence = () => {
+    const current = sequence;
     sequence = (sequence + 1) % 256;
-    return sequence;
+    return current;
   };
+  // BE resends a server message it thinks went unacknowledged (e.g. our ack was
+  // lost). Every copy is acked again, but only the first is emitted.
+  let lastServerMessageSequence = null;
 
   const pending = new Map(); // sequence -> { resolve, reject, timer, parts }
   let keepaliveTimer = null;
@@ -120,6 +130,8 @@ export async function connectRcon({
         // Acknowledge first: BE retries an unacknowledged message and then drops
         // the client, so this must not wait on any handler.
         send(ackPacket(packet.sequence));
+        if (packet.sequence === lastServerMessageSequence) return;
+        lastServerMessageSequence = packet.sequence;
         emitter.emit("chat", packet.message);
         return;
       }
